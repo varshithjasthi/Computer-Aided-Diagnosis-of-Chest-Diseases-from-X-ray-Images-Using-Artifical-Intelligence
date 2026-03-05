@@ -1,0 +1,553 @@
+<!-- src/templates/index.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X-Ray Disease Classification System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header h1 span {
+            font-weight: 700;
+            color: #3498db;
+        }
+
+        .header p {
+            color: #bdc3c7;
+            font-size: 1.1em;
+        }
+
+        .main-content {
+            padding: 40px;
+        }
+
+        .upload-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 2px dashed #3498db;
+            transition: all 0.3s ease;
+        }
+
+        .upload-section:hover {
+            border-color: #2980b9;
+            background: #f1f3f5;
+        }
+
+        .upload-area {
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .upload-area i {
+            font-size: 48px;
+            color: #3498db;
+            margin-bottom: 15px;
+        }
+
+        .upload-area h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1.5em;
+        }
+
+        .upload-area p {
+            color: #7f8c8d;
+            margin-bottom: 20px;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .browse-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .browse-btn:hover {
+            background: #2980b9;
+        }
+
+        .preview-section {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .preview-section.active {
+            display: block;
+        }
+
+        .preview-container {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .image-preview {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .image-preview img {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .results-container {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .primary-result {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .primary-result h4 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            opacity: 0.9;
+        }
+
+        .primary-result .diagnosis {
+            font-size: 2em;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .primary-result .confidence {
+            font-size: 1.5em;
+            font-weight: 300;
+        }
+
+        .top3-table {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .top3-table h4 {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #2c3e50;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .rank-1 {
+            background: #e8f5e9;
+        }
+
+        .rank-2 {
+            background: #fff3e0;
+        }
+
+        .rank-3 {
+            background: #e3f2fd;
+        }
+
+        .confidence-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+        }
+
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .error-message.active {
+            display: block;
+        }
+
+        .footer {
+            background: #2c3e50;
+            color: #bdc3c7;
+            text-align: center;
+            padding: 20px;
+            font-size: 0.9em;
+        }
+
+        .footer a {
+            color: #3498db;
+            text-decoration: none;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .main-content {
+                padding: 20px;
+            }
+            
+            .preview-container {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>X-Ray <span>Disease Classification</span></h1>
+            <p>Advanced AI-powered diagnosis for 15 chest conditions</p>
+        </div>
+
+        <div class="main-content">
+            <div class="upload-section" id="uploadSection">
+                <div class="upload-area" id="uploadArea">
+                    <i>📁</i>
+                    <h3>Drag & Drop X-Ray Image</h3>
+                    <p>or click to browse</p>
+                    <input type="file" class="file-input" id="fileInput" accept=".jpg,.jpeg,.png">
+                    <button class="browse-btn" id="browseBtn">Browse Files</button>
+                    <p style="margin-top: 15px; font-size: 0.9em;">Supported: JPG, PNG (Max 16MB)</p>
+                </div>
+            </div>
+
+            <div class="preview-section" id="previewSection">
+                <div class="preview-container">
+                    <div class="image-preview">
+                        <h3 style="margin-bottom: 15px; color: #2c3e50;">Uploaded Image</h3>
+                        <img id="previewImage" src="" alt="X-Ray Preview">
+                    </div>
+                    
+                    <div class="results-container">
+                        <div class="primary-result" id="primaryResult">
+                            <h4>Primary Diagnosis</h4>
+                            <div class="diagnosis" id="primaryDiagnosis">-</div>
+                            <div class="confidence" id="primaryConfidence">-</div>
+                        </div>
+
+                        <div class="top3-table">
+                            <h4>Top 3 Predictions</h4>
+                            <table id="predictionsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Condition</th>
+                                        <th>Confidence</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="rank-1">
+                                        <td>#1</td>
+                                        <td id="pred1Class">-</td>
+                                        <td>
+                                            <span id="pred1Conf">-</span>
+                                            <div class="confidence-bar">
+                                                <div class="confidence-fill" id="pred1Bar" style="width: 0%"></div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <tr class="rank-2">
+                                        <td>#2</td>
+                                        <td id="pred2Class">-</td>
+                                        <td>
+                                            <span id="pred2Conf">-</span>
+                                            <div class="confidence-bar">
+                                                <div class="confidence-fill" id="pred2Bar" style="width: 0%"></div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <tr class="rank-3">
+                                        <td>#3</td>
+                                        <td id="pred3Class">-</td>
+                                        <td>
+                                            <span id="pred3Conf">-</span>
+                                            <div class="confidence-bar">
+                                                <div class="confidence-fill" id="pred3Bar" style="width: 0%"></div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+
+        <div class="footer">
+            <p>© 2024 X-Ray Disease Classification System | Powered by Swin Transformer & DiT</p>
+            <p>For medical professional use only. Always consult with a qualified healthcare provider.</p>
+        </div>
+    </div>
+
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <h3>Analyzing X-Ray...</h3>
+            <p>Please wait while our AI processes the image</p>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const browseBtn = document.getElementById('browseBtn');
+        const previewSection = document.getElementById('previewSection');
+        const previewImage = document.getElementById('previewImage');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const errorMessage = document.getElementById('errorMessage');
+
+        // Drag and drop handlers
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#27ae60';
+            uploadArea.style.backgroundColor = '#e8f5e9';
+        });
+
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#3498db';
+            uploadArea.style.backgroundColor = '#f8f9fa';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#3498db';
+            uploadArea.style.backgroundColor = '#f8f9fa';
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        browseBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            // Reset error message
+            errorMessage.classList.remove('active');
+            
+            // Check file type
+            const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+            if (!validTypes.includes(file.type)) {
+                showError('Please upload a valid image file (JPG, PNG)');
+                return;
+            }
+
+            // Check file size (16MB)
+            if (file.size > 16 * 1024 * 1024) {
+                showError('File size exceeds 16MB limit');
+                return;
+            }
+
+            // Show preview
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImage.src = e.target.result;
+                previewSection.classList.add('active');
+            };
+            reader.readAsDataURL(file);
+
+            // Upload and predict
+            uploadAndPredict(file);
+        }
+
+        async function uploadAndPredict(file) {
+            // Show loading
+            loadingOverlay.classList.add('active');
+            
+            // Reset previous results
+            resetResults();
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Prediction failed');
+                }
+
+                if (data.success) {
+                    displayResults(data.predictions);
+                } else {
+                    throw new Error(data.error || 'Unknown error occurred');
+                }
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                loadingOverlay.classList.remove('active');
+            }
+        }
+
+        function displayResults(predictions) {
+            if (!predictions || predictions.length < 3) return;
+
+            // Update primary result
+            document.getElementById('primaryDiagnosis').textContent = predictions[0].class;
+            document.getElementById('primaryConfidence').textContent = `${predictions[0].confidence}% Confidence`;
+
+            // Update table
+            for (let i = 0; i < 3; i++) {
+                const pred = predictions[i];
+                document.getElementById(`pred${i+1}Class`).textContent = pred.class;
+                document.getElementById(`pred${i+1}Conf`).textContent = `${pred.confidence}%`;
+                document.getElementById(`pred${i+1}Bar`).style.width = `${pred.confidence}%`;
+            }
+        }
+
+        function resetResults() {
+            document.getElementById('primaryDiagnosis').textContent = '-';
+            document.getElementById('primaryConfidence').textContent = '-';
+            
+            for (let i = 0; i < 3; i++) {
+                document.getElementById(`pred${i+1}Class`).textContent = '-';
+                document.getElementById(`pred${i+1}Conf`).textContent = '-';
+                document.getElementById(`pred${i+1}Bar`).style.width = '0%';
+            }
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('active');
+            previewSection.classList.remove('active');
+        }
+    </script>
+</body>
+</html>
