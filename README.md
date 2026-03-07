@@ -1,4 +1,4 @@
-# 🧠 AI Radiology Assistant
+# 🧠 Computer-Aided-Diagnosis-of-Chest-Diseases-from-X-ray-Images-Using-Artifical-Intelligence
 
 ### Hybrid Vision Transformer System for Chest X-ray Analysis
 
