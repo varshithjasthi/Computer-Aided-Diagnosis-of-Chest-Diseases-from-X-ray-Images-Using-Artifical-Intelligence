@@ -1,131 +1,139 @@
-import os
+# ==============================
+# Install dependency
+# ==============================
+!pip install timm -q
+
+# ==============================
+# Imports
+# ==============================
 import torch
-import timm
-from tqdm import tqdm
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.metrics import accuracy_score
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import timm
+import os
+from tqdm import tqdm
 
+# ==============================
+# Config
+# ==============================
+DATASET_PATH = "/kaggle/input/xray-dataset/dataset_15"
 
-def main():
+IMG_SIZE = 224
+BATCH_SIZE = 64
+EPOCHS = 50
+LR = 3e-4
 
-    # =====================
-    # SETTINGS
-    # =====================
-    data_dir = r"C:\Users\giriv\OneDrive\Desktop\new x\dataset_split"
-    batch_size = 16
-    epochs = 10
-    lr = 1e-4
-    num_workers = 4   # you can keep 4 now
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print("Using device:", DEVICE)
 
-    # =====================
-    # TRANSFORMS
-    # =====================
-    train_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5]*3, [0.5]*3)
-    ])
+# ==============================
+# Augmentations
+# ==============================
+train_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(10),
+    transforms.ColorJitter(0.1,0.1,0.1,0.1),
+    transforms.RandomAffine(10),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
+])
 
-    test_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5]*3, [0.5]*3)
-    ])
+# ==============================
+# Dataset
+# ==============================
+train_dataset = datasets.ImageFolder(
+    os.path.join(DATASET_PATH,"train"),
+    transform=train_transform
+)
 
-    # =====================
-    # DATASET
-    # =====================
-    train_dataset = datasets.ImageFolder(
-        os.path.join(data_dir, "train"),
-        transform=train_transform
-    )
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=True,
+    num_workers=4,
+    pin_memory=True
+)
 
-    test_dataset = datasets.ImageFolder(
-        os.path.join(data_dir, "test"),
-        transform=test_transform
-    )
+class_names = train_dataset.classes
+num_classes = len(class_names)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size,
-                              shuffle=True, num_workers=num_workers)
+print("Classes:", class_names)
 
-    test_loader = DataLoader(test_dataset, batch_size=batch_size,
-                             shuffle=False, num_workers=num_workers)
+# ==============================
+# Swin Model
+# ==============================
+model = timm.create_model(
+    "swin_tiny_patch4_window7_224",
+    pretrained=True,
+    num_classes=num_classes
+)
 
-    num_classes = len(train_dataset.classes)
-    print("Classes:", train_dataset.classes)
+model = model.to(DEVICE)
 
-    # =====================
-    # MODEL (DeiT)
-    # =====================
-    model = timm.create_model(
-        "deit_base_patch16_224",
-        pretrained=True,
-        num_classes=num_classes
-    )
+# ==============================
+# Loss + Optimizer
+# ==============================
+criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    model.to(device)
+optimizer = optim.AdamW(
+    model.parameters(),
+    lr=LR,
+    weight_decay=1e-4
+)
 
-    # =====================
-    # LOSS + OPTIMIZER
-    # =====================
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=lr)
+scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    optimizer,
+    T_max=EPOCHS
+)
 
-    # =====================
-    # TRAIN LOOP
-    # =====================
-    for epoch in range(epochs):
-        model.train()
-        train_loss = 0
-        train_preds = []
-        train_labels = []
+scaler = torch.cuda.amp.GradScaler()
 
-        for images, labels in tqdm(train_loader):
-            images, labels = images.to(device), labels.to(device)
+# ==============================
+# Training Loop
+# ==============================
+for epoch in range(EPOCHS):
 
-            optimizer.zero_grad()
+    model.train()
+
+    correct = 0
+    total = 0
+
+    for images, labels in tqdm(train_loader):
+
+        images = images.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        optimizer.zero_grad()
+
+        with torch.cuda.amp.autocast():
+
             outputs = model(images)
             loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
 
-            train_loss += loss.item()
-            preds = torch.argmax(outputs, dim=1)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
-            train_preds.extend(preds.cpu().numpy())
-            train_labels.extend(labels.cpu().numpy())
+        _, preds = torch.max(outputs,1)
 
-        train_acc = accuracy_score(train_labels, train_preds)
+        total += labels.size(0)
+        correct += (preds == labels).sum().item()
 
-        # TEST
-        model.eval()
-        test_preds = []
-        test_labels = []
+    train_acc = 100 * correct / total
 
-        with torch.no_grad():
-            for images, labels in test_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                preds = torch.argmax(outputs, dim=1)
+    scheduler.step()
 
-                test_preds.extend(preds.cpu().numpy())
-                test_labels.extend(labels.cpu().numpy())
+    print(f"Epoch {epoch+1}/{EPOCHS} | Train Accuracy: {train_acc:.2f}%")
 
-        test_acc = accuracy_score(test_labels, test_preds)
+# ==============================
+# Save Model
+# ==============================
+torch.save({
+    "model": model.state_dict(),
+    "class_names": class_names
+}, "swin_ultra_fast_15_classes.pth")
 
-        print(f"\nEpoch [{epoch+1}/{epochs}]")
-        print(f"Train Loss: {train_loss/len(train_loader):.4f}")
-        print(f"Train Acc:  {train_acc:.4f}")
-        print(f"Test Acc:   {test_acc:.4f}")
-
-    torch.save(model.state_dict(), "deit_model.pth")
-    print("Model saved!")
-
-
-if __name__ == "__main__":
-    main()
+print("Model saved!")
