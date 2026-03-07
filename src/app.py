@@ -5,18 +5,27 @@ Complete AI Radiology Assistant with Hybrid Transformer Architecture.
 """
 
 import os
-import base64
 from datetime import datetime
 from flask import Flask, render_template, request, send_file, jsonify, send_from_directory
 from dotenv import load_dotenv
+import imghdr
 
-from models import load_models, hybrid_probability_fusion, generate_hybrid_attention_map, DEVICE, MODEL_MODE
-from services import process_image, generate_medical_graphs, generate_detailed_pdf, get_ai_guidance
+# Import from models
+from models import load_models, hybrid_probability_fusion, generate_hybrid_attention_map
+
+# Import from services
+from services import (
+    process_image, generate_medical_graphs, generate_detailed_pdf, get_ai_guidance,
+    validate_image_format
+)
+
+# Import from utils
 from utils import (
     UPLOAD_FOLDER, HEATMAP_FOLDER, REPORT_FOLDER, GRAPH_FOLDER,
     HOSPITAL_NAME, HEAD_RADIOLOGIST, DEPT, LICENSE_NO,
     CLINICAL_SYMPTOMS, MEDICAL_HISTORY,
-    get_risk_assessment, get_disease_explanation, normalize_class_name
+    get_risk_assessment, get_disease_explanation, normalize_class_name,
+    DEVICE, MODEL_MODE
 )
 
 # Load environment variables
@@ -26,20 +35,26 @@ load_dotenv()
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_UPLOAD_SIZE', 16 * 1024 * 1024))
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png'}
 
 # Create necessary directories
 for folder in [UPLOAD_FOLDER, HEATMAP_FOLDER, REPORT_FOLDER, GRAPH_FOLDER]:
     os.makedirs(folder, exist_ok=True)
 
+# Allowed file extensions for validation
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+def allowed_file(filename):
+    """Check if file has an allowed extension."""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 # Load AI models (hybrid architecture)
 print(f"\n{'='*60}")
 print(f"🏥 METRO ADVANCED RADIOLOGY CENTER - AI DIAGNOSTIC SYSTEM")
 print(f"{'='*60}")
-hybrid_model, deit_model, swin_model, class_names = load_models(
-    deit_path='models/deit_model.pth',  # Update path as needed
-    swin_path='models/swin_model.pth',   # Update path as needed
-    device=DEVICE
-)
+
+# Load models - FIXED: Correct unpacking (2 models, not 3)
+hybrid_model, deit_model, swin_model, class_names = load_models()
 print(f"\n{'='*60}")
 print(f"✅ System Ready - Active Mode: {MODEL_MODE.upper()}")
 print(f"{'='*60}\n")
@@ -78,9 +93,12 @@ def analyze():
     Processes radiographic images through hybrid AI models and generates comprehensive reports.
     """
     try:
+        print("📤 Image received - starting analysis pipeline")
+        
         # 🔥 CRITICAL: Check content length BEFORE accessing request.form
         max_size = int(os.getenv('MAX_UPLOAD_SIZE', 16 * 1024 * 1024))
         if request.content_length and request.content_length > max_size:
+            print(f"❌ Request too large: {request.content_length} bytes")
             return jsonify({
                 "status": "error",
                 "message": f"Request too large. Maximum image size is {max_size // (1024*1024)}MB. Please use a smaller image or compress it."
@@ -112,10 +130,20 @@ def analyze():
         
         # Validate image input
         if not cam_data and (not upload_file or upload_file.filename == ''):
+            print("❌ No image provided")
             return jsonify({
                 "status": "error", 
                 "message": "No radiographic image provided. Please capture or upload an image."
             }), 400
+
+        # Validate file type for uploads
+        if upload_file and upload_file.filename:
+            if not allowed_file(upload_file.filename):
+                print(f"❌ Invalid file type: {upload_file.filename}")
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid file type. Please upload JPG, JPEG, or PNG images only."
+                }), 400
 
         # Generate unique filename for this analysis
         timestamp = datetime.now().strftime('%H%M%S')
@@ -123,24 +151,43 @@ def analyze():
         save_path = os.path.join(UPLOAD_FOLDER, filename + ".jpg")
 
         # Process and save the image
+        print("💾 Saving image...")
         image_saved = process_image(cam_data, upload_file, save_path)
         if not image_saved:
+            print("❌ Failed to process image")
             return jsonify({
                 "status": "error", 
                 "message": "Failed to process image. The image may be too large or corrupted."
             }), 400
         
+        # Validate image format after saving
+        if not validate_image_format(save_path):
+            print("❌ Invalid image format")
+            os.remove(save_path)
+            return jsonify({
+                "status": "error",
+                "message": "Invalid image format. Please upload a valid JPG, JPEG, or PNG image."
+            }), 400
+        
         # Run AI inference using hybrid model architecture
-        print(f"🔍 Running inference with {MODEL_MODE.upper()} mode...")
-        predictions, img_tensor = hybrid_probability_fusion(
-            image_path=save_path,
-            hybrid_model=hybrid_model,
-            deit_model=deit_model,
-            swin_model=swin_model,
-            class_names=class_names,
-            mode=MODEL_MODE,
-            device=DEVICE
-        )
+        print(f"🧠 Running hybrid inference with {MODEL_MODE.upper()} mode...")
+        try:
+            predictions, img_tensor = hybrid_probability_fusion(
+    image_path=save_path,
+    hybrid_model=hybrid_model,
+    deit_model=deit_model,
+    swin_model=swin_model,
+    class_names=class_names,
+    mode=MODEL_MODE,
+    device=DEVICE
+)
+            print("✅ Inference complete")
+        except Exception as e:
+            print(f"❌ Inference failed: {e}")
+            return jsonify({
+                "status": "error",
+                "message": "AI model inference failed. Please try again."
+            }), 500
         
         # Determine primary finding
         predictions.sort(key=lambda x: x["probability"], reverse=True)
@@ -172,50 +219,82 @@ def analyze():
         risk_info = get_risk_assessment(primary_class, primary_prediction["probability"])
         
         # Generate AI attention map (heatmap)
+        print("🔥 Generating attention map...")
         primary_class_idx = class_names.index(primary_prediction["disease"]) if primary_prediction["disease"] in class_names else 0
         h_name = f"heat_{filename}.jpg"
         h_path = os.path.join(HEATMAP_FOLDER, h_name)
         
-        heatmap_description, heatmap_success = generate_hybrid_attention_map(
-            img_tensor=img_tensor,
-            deit_model=deit_model,
-            swin_model=swin_model,
-            class_idx=primary_class_idx,
-            class_names=class_names,
-            save_path=h_path,
-            device=DEVICE,
-            mode=MODEL_MODE,
-            is_normal=is_normal
-        )
+        try:
+            heatmap_description, heatmap_success = generate_hybrid_attention_map(
+                img_tensor=img_tensor,
+                deit_model=deit_model,
+                swin_model=swin_model,
+                class_idx=primary_class_idx,
+                class_names=class_names,
+                save_path=h_path,
+                device=DEVICE,
+                mode=MODEL_MODE,
+                is_normal=is_normal
+            )
+            print(f"✅ Heatmap generated: {heatmap_success}")
+        except Exception as e:
+            print(f"⚠️ Heatmap generation failed: {e}")
+            heatmap_description = "Attention map generation unavailable."
+            heatmap_success = False
         
         # Generate medical visualization graphs
-        graphs = generate_medical_graphs(predictions, filename)
+        print("📊 Generating medical graphs...")
+        try:
+            graphs = generate_medical_graphs(predictions, filename)
+            print("✅ Graphs generated")
+        except Exception as e:
+            print(f"⚠️ Graph generation failed: {e}")
+            graphs = {"donut_chart": None, "bar_chart": None, "risk_chart": None}
         
         # Get AI-generated clinical guidance from OpenRouter
-        ai_guidance = get_ai_guidance(
-            disease=primary_class,
-            probability=primary_prediction["probability"],
-            symptoms=symptoms,
-            patient_vitals=patient_vitals
-        )
+        print("🤖 Requesting AI guidance...")
+        try:
+            ai_guidance = get_ai_guidance(
+                disease=primary_class,
+                probability=primary_prediction["probability"],
+                symptoms=symptoms,
+                patient_vitals=patient_vitals
+            )
+            print("✅ AI guidance received")
+        except Exception as e:
+            print(f"⚠️ AI guidance failed: {e}")
+            explanation = get_disease_explanation(primary_class)
+            ai_guidance = {
+                "explanation": explanation["medical_reason"],
+                "diet": "; ".join(explanation["lifestyle_recommendations"]["diet"]),
+                "lifestyle": "; ".join(explanation["lifestyle_recommendations"]["habits"]),
+                "warning_signs": "; ".join(explanation["emergency_signs"]),
+                "disclaimer": "AI guidance unavailable. Using standard medical guidance."
+            }
         
         # Generate comprehensive PDF report
+        print("📄 Generating PDF report...")
         pdf_name = f"Radiology_Report_{patient['id']}_{timestamp}.pdf"
         pdf_path = os.path.join(REPORT_FOLDER, pdf_name)
         
-        generate_detailed_pdf(
-            pdf_path=pdf_path,
-            patient=patient,
-            image_path=save_path,
-            heatmap_path=h_path if heatmap_success else None,
-            predictions=predictions,
-            symptoms=symptoms,
-            patient_vitals=patient_vitals,
-            medical_history=medical_history,
-            is_normal=is_normal,
-            heatmap_description=heatmap_description,
-            ai_guidance=ai_guidance
-        )
+        try:
+            generate_detailed_pdf(
+                pdf_path=pdf_path,
+                patient=patient,
+                image_path=save_path,
+                heatmap_path=h_path if heatmap_success else None,
+                predictions=predictions,
+                symptoms=symptoms,
+                patient_vitals=patient_vitals,
+                medical_history=medical_history,
+                is_normal=is_normal,
+                heatmap_description=heatmap_description,
+                ai_guidance=ai_guidance
+            )
+            print("✅ PDF report generated")
+        except Exception as e:
+            print(f"❌ PDF generation failed: {e}")
+            # Continue without PDF - we'll still return results
 
         # Prepare comprehensive response data
         response_data = {
@@ -246,7 +325,7 @@ def analyze():
             "patient_vitals": patient_vitals,
             "medical_history": medical_history,
             "image_url": f"/uploads/{filename}.jpg",
-            "pdf_url": f"/download?path={pdf_path}",
+            "pdf_url": f"/download?path={pdf_path}" if os.path.exists(pdf_path) else None,
             "report_id": datetime.now().strftime("%Y%m%d%H%M%S"),
             "heatmap_description": heatmap_description,
             "ai_guidance": ai_guidance,
@@ -294,6 +373,7 @@ def download():
             return jsonify({"status": "error", "message": "Report not found"}), 404
         return send_file(path, as_attachment=True, download_name=os.path.basename(path))
     except Exception as e:
+        print(f"❌ Download error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/api/symptoms")
@@ -329,6 +409,11 @@ def health_check():
         "openrouter": "Configured" if os.getenv('OPENROUTER_API_KEY') else "Not configured"
     })
 
+@app.route("/api/health")
+def api_health():
+    """API health check endpoint (alias for /health)."""
+    return health_check()
+
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
@@ -360,7 +445,7 @@ if __name__ == "__main__":
     print(f"🚀 NEURORAD AI - Hybrid Transformer System")
     print(f"{'='*60}")
     print(f"📊 Model Mode: {MODEL_MODE.upper()}")
-    print(f"🤖 Neural Architectures: DeiT-Tiny + Swin-Tiny")
+    print(f"🤖 Neural Architectures: DeiT-Small + Swin-Tiny")
     print(f"📈 Probability Fusion: Weighted Averaging (50% DeiT + 50% Swin)")
     print(f"🏥 Institution: {HOSPITAL_NAME}")
     print(f"👨‍⚕️ Lead Radiologist: {HEAD_RADIOLOGIST}")

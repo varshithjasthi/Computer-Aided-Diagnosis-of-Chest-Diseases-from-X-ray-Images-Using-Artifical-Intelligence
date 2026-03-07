@@ -9,6 +9,7 @@ import base64
 import cv2
 import numpy as np
 import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -17,14 +18,11 @@ import json
 import io
 
 # ReportLab for PDF generation
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as PDFImage, Table, TableStyle, PageBreak
 from reportlab.lib import colors
-from reportlab.lib.units import inch, cm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.fonts import addMapping
+from reportlab.lib.units import inch
 
 # OpenRouter AI integration via OpenAI SDK
 from openai import OpenAI
@@ -33,22 +31,29 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import from utils
 from utils import (
     HOSPITAL_NAME, HEAD_RADIOLOGIST, DEPT, LICENSE_NO,
     HEATMAP_FOLDER, REPORT_FOLDER, GRAPH_FOLDER,
-    get_risk_assessment, get_disease_explanation, get_specialist_for_disease,
-    normalize_class_name, DISEASE_EXPLANATIONS, RISK_LEVELS
+    get_risk_assessment, get_disease_explanation,
+    get_specialist_for_disease, normalize_class_name,
+    DISEASE_EXPLANATIONS
 )
+
 
 # ==================== OPENROUTER AI CONFIGURATION ====================
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 if OPENROUTER_API_KEY:
-    client = OpenAI(
-        api_key=OPENROUTER_API_KEY,
-        base_url="https://openrouter.ai/api/v1"
-    )
-    print("✅ OpenRouter AI configured successfully")
+    try:
+        client = OpenAI(
+            api_key=OPENROUTER_API_KEY,
+            base_url="https://openrouter.ai/api/v1"
+        )
+        print("✅ OpenRouter AI configured successfully")
+    except Exception as e:
+        print(f"⚠️ OpenRouter initialization failed: {e}")
+        client = None
 else:
     client = None
     print("⚠️ OpenRouter API key not found. AI guidance will use predefined explanations.")
@@ -79,7 +84,7 @@ def process_image(cam_data, upload_file, save_path):
                 
             # Decode and save
             image_data = base64.b64decode(encoded)
-            with open(save_path, "wb") as f: 
+            with open(save_path, "wb") as f:
                 f.write(image_data)
             
             # Verify image integrity
@@ -90,11 +95,21 @@ def process_image(cam_data, upload_file, save_path):
                 return True
             except Exception as e:
                 print(f"❌ Corrupted image data: {e}")
-                os.remove(save_path)
+                if os.path.exists(save_path):
+                    os.remove(save_path)
                 return False
                 
-        elif upload_file and upload_file.filename != '':
+        elif upload_file and hasattr(upload_file, 'filename') and upload_file.filename:
             # Handle file upload
+            # Validate file extension
+            allowed_extensions = {'.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG'}
+            file_ext = os.path.splitext(upload_file.filename)[1].lower()
+            
+            if file_ext not in allowed_extensions:
+                print(f"❌ Unsupported file format: {file_ext}")
+                return False
+            
+            # Save the file
             upload_file.save(save_path)
             
             # Verify image integrity
@@ -105,7 +120,8 @@ def process_image(cam_data, upload_file, save_path):
                 return True
             except Exception as e:
                 print(f"❌ Corrupted upload file: {e}")
-                os.remove(save_path)
+                if os.path.exists(save_path):
+                    os.remove(save_path)
                 return False
             
         else:
@@ -115,6 +131,7 @@ def process_image(cam_data, upload_file, save_path):
     except Exception as e:
         print(f"❌ Error processing image: {e}")
         return False
+
 
 def resize_image_if_needed(image_path, max_size_mb=16):
     """
@@ -128,6 +145,9 @@ def resize_image_if_needed(image_path, max_size_mb=16):
         bool: True if image was resized or already ok
     """
     try:
+        if not os.path.exists(image_path):
+            return False
+            
         file_size = os.path.getsize(image_path) / (1024 * 1024)  # Size in MB
         
         if file_size <= max_size_mb:
@@ -138,17 +158,27 @@ def resize_image_if_needed(image_path, max_size_mb=16):
         
         # Calculate new size (reduce by 50% iteratively until under limit)
         quality = 95
+        temp_path = image_path + ".temp"
+        
         while file_size > max_size_mb and quality > 10:
             # Save with reduced quality
-            temp_path = image_path + ".temp"
             img.save(temp_path, quality=quality, optimize=True)
             
-            new_size = os.path.getsize(temp_path) / (1024 * 1024)
-            if new_size < file_size:
-                os.replace(temp_path, image_path)
-                file_size = new_size
+            if os.path.exists(temp_path):
+                new_size = os.path.getsize(temp_path) / (1024 * 1024)
+                if new_size < file_size:
+                    os.replace(temp_path, image_path)
+                    file_size = new_size
+                else:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    break
             
             quality -= 15
+        
+        # Clean up temp file if it still exists
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         
         print(f"✅ Image resized to {file_size:.2f}MB")
         return True
@@ -170,9 +200,11 @@ def generate_medical_graphs(predictions, filename_prefix):
     Returns:
         dict: URLs to generated graph images
     """
-    graphs = {}
+    graphs = {"donut_chart": None, "bar_chart": None, "risk_chart": None}
     
     try:
+        print("📊 Generating medical graphs...")
+        
         # Extract NORMAL and disease predictions
         normal_pred = None
         disease_preds = []
@@ -208,12 +240,12 @@ def generate_medical_graphs(predictions, filename_prefix):
         
         # Create donut chart
         wedges, texts, autotexts = ax.pie(
-            sizes, 
-            colors=colors_donut, 
-            labels=labels, 
-            autopct='%1.1f%%', 
-            startangle=90, 
-            explode=explode, 
+            sizes,
+            colors=colors_donut,
+            labels=labels,
+            autopct='%1.1f%%',
+            startangle=90,
+            explode=explode,
             wedgeprops=dict(width=0.5, edgecolor='white', linewidth=2),
             textprops={'fontsize': 11, 'fontweight': 'bold'}
         )
@@ -229,14 +261,14 @@ def generate_medical_graphs(predictions, filename_prefix):
             autotext.set_fontweight('bold')
             autotext.set_fontsize(10)
         
-        ax.set_title('NORMAL vs DISEASE Probability Distribution', 
+        ax.set_title('NORMAL vs DISEASE Probability Distribution',
                     fontsize=14, fontweight='bold', pad=20, color='#1e3a8a')
         ax.axis('equal')
         
         # Add center text
-        centre_circle = plt.Circle((0,0), 0.25, fc='white', edgecolor='#e5e7eb', linewidth=2)
+        centre_circle = plt.Circle((0, 0), 0.25, fc='white', edgecolor='#e5e7eb', linewidth=2)
         fig.gca().add_artist(centre_circle)
-        ax.text(0, 0, 'AI\nAssessment', ha='center', va='center', 
+        ax.text(0, 0, 'AI\nAssessment', ha='center', va='center',
                 fontsize=12, fontweight='bold', color='#1e3a8a')
         
         # Save donut chart
@@ -289,8 +321,8 @@ def generate_medical_graphs(predictions, filename_prefix):
             # Add probability values on bars
             for i, (bar, prob) in enumerate(zip(bars, disease_probs)):
                 width = bar.get_width()
-                ax.text(width + 1, bar.get_y() + bar.get_height()/2, 
-                       f'{prob:.1f}%', ha='left', va='center', 
+                ax.text(width + 1, bar.get_y() + bar.get_height()/2,
+                       f'{prob:.1f}%', ha='left', va='center',
                        fontsize=10, fontweight='bold', color='#1f2937')
             
             # Add grid for better readability
@@ -308,8 +340,6 @@ def generate_medical_graphs(predictions, filename_prefix):
             plt.close()
             
             graphs["bar_chart"] = f"/static/graphs/{filename_prefix}_bar.png"
-        else:
-            graphs["bar_chart"] = None
         
         # 3. RISK DISTRIBUTION PIE CHART (if disease present)
         if disease_preds and disease_percent > 0:
@@ -336,8 +366,8 @@ def generate_medical_graphs(predictions, filename_prefix):
                 ax.set_facecolor('white')
                 
                 wedges, texts, autotexts = ax.pie(
-                    risk_values, 
-                    labels=risk_labels, 
+                    risk_values,
+                    labels=risk_labels,
                     colors=risk_colors,
                     autopct='%1.0f%%',
                     startangle=90,
@@ -349,7 +379,7 @@ def generate_medical_graphs(predictions, filename_prefix):
                     autotext.set_color('white')
                     autotext.set_fontweight('bold')
                 
-                ax.set_title('Risk Distribution Among Findings', 
+                ax.set_title('Risk Distribution Among Findings',
                             fontsize=14, fontweight='bold', pad=20, color='#1e3a8a')
                 
                 # Save risk chart
@@ -364,9 +394,8 @@ def generate_medical_graphs(predictions, filename_prefix):
         
     except Exception as e:
         print(f"❌ Error generating graphs: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"donut_chart": None, "bar_chart": None}
+        return graphs
+
 
 # ==================== OPENROUTER AI GUIDANCE ====================
 
@@ -383,18 +412,20 @@ def get_ai_guidance(disease, probability, symptoms, patient_vitals):
     Returns:
         dict: AI guidance information with explanation, diet, lifestyle, warning signs
     """
-    # If OpenRouter not configured, use predefined explanations
-    if not client:
-        explanation = get_disease_explanation(disease)
-        return {
-            "explanation": explanation["medical_reason"],
-            "diet": "; ".join(explanation["lifestyle_recommendations"]["diet"]),
-            "lifestyle": "; ".join(explanation["lifestyle_recommendations"]["habits"]),
-            "warning_signs": "; ".join(explanation["emergency_signs"]),
-            "disclaimer": "Using predefined medical guidance. For personalized advice, consult healthcare provider."
-        }
-    
     try:
+        print("🤖 Requesting OpenRouter guidance...")
+        
+        # If OpenRouter not configured, use predefined explanations
+        if not client:
+            explanation = get_disease_explanation(disease)
+            return {
+                "explanation": explanation["medical_reason"],
+                "diet": "; ".join(explanation["lifestyle_recommendations"]["diet"]),
+                "lifestyle": "; ".join(explanation["lifestyle_recommendations"]["habits"]),
+                "warning_signs": "; ".join(explanation["emergency_signs"]),
+                "disclaimer": "Using predefined medical guidance. For personalized advice, consult healthcare provider."
+            }
+        
         # Format symptoms
         symptoms_text = ', '.join(symptoms) if symptoms else 'None reported'
         
@@ -454,8 +485,7 @@ Example format:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            max_tokens=600,
-            response_format={"type": "json_object"}
+            max_tokens=600
         )
         
         try:
@@ -509,10 +539,11 @@ Example format:
             "disclaimer": "AI guidance unavailable. Using standard medical guidance."
         }
 
+
 # ==================== PDF REPORT GENERATION ====================
 
-def generate_detailed_pdf(pdf_path, patient, image_path, heatmap_path, predictions, symptoms, 
-                         patient_vitals, medical_history, is_normal, heatmap_description, ai_guidance):
+def generate_detailed_pdf(pdf_path, patient, image_path, heatmap_path, predictions, symptoms,
+                          patient_vitals, medical_history, is_normal, heatmap_description, ai_guidance):
     """
     Generates a professional 2-page clinical report with modern design and comprehensive findings.
     
@@ -529,493 +560,525 @@ def generate_detailed_pdf(pdf_path, patient, image_path, heatmap_path, predictio
         heatmap_description: Description of AI attention map
         ai_guidance: AI-generated guidance
     """
-    # Create PDF document
-    doc = SimpleDocTemplate(
-        pdf_path, 
-        pagesize=A4, 
-        rightMargin=40, 
-        leftMargin=40, 
-        topMargin=40, 
-        bottomMargin=40,
-        title=f"Radiology Report - {patient['name']}",
-        author="AI Radiology Assistant"
-    )
-    
-    styles = getSampleStyleSheet()
-    elements = []
+    try:
+        print("📄 Creating PDF report...")
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(
+            pdf_path,
+            pagesize=A4,
+            rightMargin=40,
+            leftMargin=40,
+            topMargin=40,
+            bottomMargin=40,
+            title=f"Radiology Report - {patient.get('name', 'Patient')}",
+            author="AI Radiology Assistant"
+        )
+        
+        styles = getSampleStyleSheet()
+        elements = []
+        
+        # ==================== CUSTOM STYLES ====================
+        styles.add(ParagraphStyle(
+            name='HospitalTitle',
+            fontSize=16,
+            textColor=colors.HexColor('#1e3a8a'),
+            alignment=1,  # Center
+            spaceAfter=6,
+            fontName='Helvetica-Bold'
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='Department',
+            fontSize=10,
+            textColor=colors.HexColor('#4b5563'),
+            alignment=1,
+            spaceAfter=12,
+            fontName='Helvetica'
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='Disclaimer',
+            fontSize=8,
+            textColor=colors.HexColor('#b91c1c'),
+            alignment=1,
+            spaceAfter=12,
+            fontName='Helvetica-Oblique'
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='SectionHeader',
+            fontSize=12,
+            textColor=colors.HexColor('#1e3a8a'),
+            spaceAfter=8,
+            spaceBefore=12,
+            fontName='Helvetica-Bold',
+            borderWidth=1,
+            borderColor=colors.HexColor('#e5e7eb'),
+            borderPadding=(5, 0, 5, 0)
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='InfoLabel',
+            fontSize=9,
+            textColor=colors.HexColor('#6b7280'),
+            fontName='Helvetica-Bold',
+            alignment=2  # Right
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='InfoValue',
+            fontSize=9,
+            textColor=colors.HexColor('#1f2937'),
+            fontName='Helvetica',
+            alignment=0  # Left
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='NormalText',
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor('#1f2937'),
+            fontName='Helvetica',
+            spaceAfter=6
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='RiskHigh',
+            fontSize=10,
+            textColor=colors.HexColor('#ffffff'),
+            backColor=colors.HexColor('#ef4444'),
+            alignment=1,
+            fontName='Helvetica-Bold',
+            borderPadding=(3, 10, 3, 10)
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='RiskModerate',
+            fontSize=10,
+            textColor=colors.HexColor('#ffffff'),
+            backColor=colors.HexColor('#f59e0b'),
+            alignment=1,
+            fontName='Helvetica-Bold',
+            borderPadding=(3, 10, 3, 10)
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='RiskLow',
+            fontSize=10,
+            textColor=colors.HexColor('#ffffff'),
+            backColor=colors.HexColor('#3b82f6'),
+            alignment=1,
+            fontName='Helvetica-Bold',
+            borderPadding=(3, 10, 3, 10)
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='RiskNone',
+            fontSize=10,
+            textColor=colors.HexColor('#ffffff'),
+            backColor=colors.HexColor('#10b981'),
+            alignment=1,
+            fontName='Helvetica-Bold',
+            borderPadding=(3, 10, 3, 10)
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='Guidance',
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor('#1f2937'),
+            fontName='Helvetica',
+            leftIndent=10,
+            spaceAfter=4
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='Emergency',
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor('#b91c1c'),
+            fontName='Helvetica-Bold',
+            leftIndent=10,
+            spaceAfter=4
+        ))
 
-    # ==================== CUSTOM STYLES ====================
-    styles.add(ParagraphStyle(
-        name='HospitalTitle',
-        fontSize=16,
-        textColor=colors.HexColor('#1e3a8a'),
-        alignment=1,  # Center
-        spaceAfter=6,
-        fontName='Helvetica-Bold'
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='Department',
-        fontSize=10,
-        textColor=colors.HexColor('#4b5563'),
-        alignment=1,
-        spaceAfter=12,
-        fontName='Helvetica'
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='Disclaimer',
-        fontSize=8,
-        textColor=colors.HexColor('#b91c1c'),
-        alignment=1,
-        spaceAfter=12,
-        fontName='Helvetica-Oblique'
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='SectionHeader',
-        fontSize=12,
-        textColor=colors.HexColor('#1e3a8a'),
-        spaceAfter=8,
-        spaceBefore=12,
-        fontName='Helvetica-Bold',
-        borderWidth=1,
-        borderColor=colors.HexColor('#e5e7eb'),
-        borderPadding=(5, 0, 5, 0)
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='InfoLabel',
-        fontSize=9,
-        textColor=colors.HexColor('#6b7280'),
-        fontName='Helvetica-Bold',
-        alignment=2  # Right
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='InfoValue',
-        fontSize=9,
-        textColor=colors.HexColor('#1f2937'),
-        fontName='Helvetica',
-        alignment=0  # Left
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='NormalText',
-        fontSize=10,
-        leading=14,
-        textColor=colors.HexColor('#1f2937'),
-        fontName='Helvetica',
-        spaceAfter=6
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='RiskHigh',
-        fontSize=10,
-        textColor=colors.HexColor('#ffffff'),
-        backColor=colors.HexColor('#ef4444'),
-        alignment=1,
-        fontName='Helvetica-Bold',
-        borderPadding=(3, 10, 3, 10)
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='RiskModerate',
-        fontSize=10,
-        textColor=colors.HexColor('#ffffff'),
-        backColor=colors.HexColor('#f59e0b'),
-        alignment=1,
-        fontName='Helvetica-Bold',
-        borderPadding=(3, 10, 3, 10)
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='RiskLow',
-        fontSize=10,
-        textColor=colors.HexColor('#ffffff'),
-        backColor=colors.HexColor('#3b82f6'),
-        alignment=1,
-        fontName='Helvetica-Bold',
-        borderPadding=(3, 10, 3, 10)
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='RiskNone',
-        fontSize=10,
-        textColor=colors.HexColor('#ffffff'),
-        backColor=colors.HexColor('#10b981'),
-        alignment=1,
-        fontName='Helvetica-Bold',
-        borderPadding=(3, 10, 3, 10)
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='Guidance',
-        fontSize=9,
-        leading=12,
-        textColor=colors.HexColor('#1f2937'),
-        fontName='Helvetica',
-        leftIndent=10,
-        spaceAfter=4
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='Emergency',
-        fontSize=9,
-        leading=12,
-        textColor=colors.HexColor('#b91c1c'),
-        fontName='Helvetica-Bold',
-        leftIndent=10,
-        spaceAfter=4
-    ))
-
-    # ==================== PAGE 1 HEADER ====================
-    # Hospital header
-    header_data = [[
-        Paragraph(f"<b>{HOSPITAL_NAME}</b>", styles['HospitalTitle'])
-    ]]
-    header_table = Table(header_data, colWidths=[500])
-    header_table.setStyle(TableStyle([
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 0)
-    ]))
-    elements.append(header_table)
-    
-    # Department
-    elements.append(Paragraph(f"{DEPT}", styles['Department']))
-    
-    # Report title
-    elements.append(Paragraph(
-        "<font size=14><b>AI-ASSISTED RADIOGRAPHIC ANALYSIS REPORT</b></font>",
-        styles['Normal']
-    ))
-    elements.append(Spacer(1, 10))
-    
-    # Primary disclaimer
-    elements.append(Paragraph(
-        "<font color='#b91c1c'><b>IMPORTANT:</b> This is an AI-assisted preliminary analysis and NOT a final diagnosis. "
-        "All findings require clinical correlation by a qualified radiologist.</font>",
-        styles['Disclaimer']
-    ))
-    elements.append(Spacer(1, 15))
-
-    # ==================== PATIENT INFORMATION TABLE ====================
-    # Create patient info grid
-    p_data = [
-        ["PATIENT INFORMATION", "", "REPORT DETAILS", ""],
-        ["Name:", patient['name'], "Report ID:", f"RAD-{datetime.now().strftime('%Y%m%d%H%M')}"],
-        ["Patient ID:", patient['id'], "Exam Date:", patient['date']],
-        ["Age/Sex:", f"{patient['age']} / {patient['sex']}", "Reported By:", HEAD_RADIOLOGIST],
-        ["Referring Dr:", patient.get('referring_dr', 'N/A'), "License No:", LICENSE_NO],
-    ]
-    
-    p_table = Table(p_data, colWidths=[100, 150, 100, 150])
-    p_table.setStyle(TableStyle([
-        ('SPAN', (0,0), (1,0)),  # Merge first two cells in row 0
-        ('SPAN', (2,0), (3,0)),  # Merge last two cells in row 0
-        ('BACKGROUND', (0,0), (1,0), colors.HexColor('#1e3a8a')),
-        ('BACKGROUND', (2,0), (3,0), colors.HexColor('#1e3a8a')),
-        ('TEXTCOLOR', (0,0), (1,0), colors.white),
-        ('TEXTCOLOR', (2,0), (3,0), colors.white),
-        ('FONTSIZE', (0,0), (-1,-1), 9),
-        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-        ('FONTNAME', (0,0), (1,0), 'Helvetica-Bold'),
-        ('FONTNAME', (2,0), (3,0), 'Helvetica-Bold'),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e5e7eb')),
-        ('BACKGROUND', (0,1), (-1,-1), colors.white),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-        ('ALIGN', (0,0), (1,0), 'CENTER'),
-        ('ALIGN', (2,0), (3,0), 'CENTER'),
-        ('PADDING', (0,0), (-1,-1), 6)
-    ]))
-    elements.append(p_table)
-    elements.append(Spacer(1, 15))
-
-    # ==================== CLINICAL DATA SECTION ====================
-    clinical_data = []
-    
-    # Symptoms
-    if symptoms:
-        symptoms_text = ", ".join(symptoms)
-        clinical_data.append([Paragraph("<b>Reported Symptoms:</b>", styles['InfoLabel']), 
-                             Paragraph(symptoms_text, styles['InfoValue'])])
-    
-    # Medical History
-    if medical_history:
-        history_text = ", ".join(medical_history)
-        clinical_data.append([Paragraph("<b>Medical History:</b>", styles['InfoLabel']), 
-                             Paragraph(history_text, styles['InfoValue'])])
-    
-    # Vitals
-    vitals_parts = []
-    if patient_vitals.get('bp'): vitals_parts.append(f"BP: {patient_vitals['bp']}")
-    if patient_vitals.get('sugar'): vitals_parts.append(f"Glucose: {patient_vitals['sugar']}")
-    if patient_vitals.get('smoking'): vitals_parts.append(f"Smoking: {patient_vitals['smoking']}")
-    if patient_vitals.get('alcohol'): vitals_parts.append(f"Alcohol: {patient_vitals['alcohol']}")
-    
-    if vitals_parts:
-        vitals_text = " | ".join(vitals_parts)
-        clinical_data.append([Paragraph("<b>Vital Signs:</b>", styles['InfoLabel']), 
-                             Paragraph(vitals_text, styles['InfoValue'])])
-    
-    if clinical_data:
-        c_table = Table(clinical_data, colWidths=[100, 400])
-        c_table.setStyle(TableStyle([
-            ('FONTSIZE', (0,0), (-1,-1), 9),
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('LEFTPADDING', (0,0), (-1,-1), 0),
-            ('RIGHTPADDING', (0,0), (-1,-1), 0),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 4)
+        # ==================== PAGE 1 HEADER ====================
+        # Hospital header
+        header_data = [[
+            Paragraph(f"<b>{HOSPITAL_NAME}</b>", styles['HospitalTitle'])
+        ]]
+        header_table = Table(header_data, colWidths=[500])
+        header_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0)
         ]))
-        elements.append(c_table)
+        elements.append(header_table)
+        
+        # Department
+        elements.append(Paragraph(f"{DEPT}", styles['Department']))
+        
+        # Report title
+        elements.append(Paragraph(
+            "<font size=14><b>AI-ASSISTED RADIOGRAPHIC ANALYSIS REPORT</b></font>",
+            styles['Normal']
+        ))
+        elements.append(Spacer(1, 10))
+        
+        # Primary disclaimer
+        elements.append(Paragraph(
+            "<font color='#b91c1c'><b>IMPORTANT:</b> This is an AI-assisted preliminary analysis and NOT a final diagnosis. "
+            "All findings require clinical correlation by a qualified radiologist.</font>",
+            styles['Disclaimer']
+        ))
         elements.append(Spacer(1, 15))
 
-    # ==================== PRIMARY FINDING BANNER ====================
-    primary_pred = predictions[0]
-    primary_class = normalize_class_name(primary_pred['disease'])
-    risk_assessment = get_risk_assessment(primary_class, primary_pred['probability'])
-    
-    if is_normal:
-        banner_text = f"<b>PRIMARY FINDING: NORMAL CHEST RADIOGRAPH - NO ABNORMALITY DETECTED</b>"
-        banner_style = 'RiskNone'
-    else:
-        banner_text = f"<b>PRIMARY FINDING: {primary_class.upper()} - {risk_assessment['risk_level']}</b>"
-        if risk_assessment['risk_level'] == 'HIGH RISK':
-            banner_style = 'RiskHigh'
-        elif risk_assessment['risk_level'] == 'MODERATE RISK':
-            banner_style = 'RiskModerate'
-        else:
-            banner_style = 'RiskLow'
-    
-    elements.append(Paragraph(banner_text, styles[banner_style]))
-    elements.append(Spacer(1, 15))
+        # ==================== PATIENT INFORMATION TABLE ====================
+        # Create patient info grid
+        p_data = [
+            ["PATIENT INFORMATION", "", "REPORT DETAILS", ""],
+            ["Name:", patient.get('name', 'N/A'), "Report ID:", f"RAD-{datetime.now().strftime('%Y%m%d%H%M')}"],
+            ["Patient ID:", patient.get('id', 'N/A'), "Exam Date:", patient.get('date', 'N/A')],
+            ["Age/Sex:", f"{patient.get('age', 'N/A')} / {patient.get('sex', 'N/A')}", "Reported By:", HEAD_RADIOLOGIST],
+            ["Referring Dr:", patient.get('referring_dr', 'N/A'), "License No:", LICENSE_NO],
+        ]
+        
+        p_table = Table(p_data, colWidths=[100, 150, 100, 150])
+        p_table.setStyle(TableStyle([
+            ('SPAN', (0, 0), (1, 0)),  # Merge first two cells in row 0
+            ('SPAN', (2, 0), (3, 0)),  # Merge last two cells in row 0
+            ('BACKGROUND', (0, 0), (1, 0), colors.HexColor('#1e3a8a')),
+            ('BACKGROUND', (2, 0), (3, 0), colors.HexColor('#1e3a8a')),
+            ('TEXTCOLOR', (0, 0), (1, 0), colors.white),
+            ('TEXTCOLOR', (2, 0), (3, 0), colors.white),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (2, 0), (3, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (0, 0), (1, 0), 'CENTER'),
+            ('ALIGN', (2, 0), (3, 0), 'CENTER'),
+            ('PADDING', (0, 0), (-1, -1), 6)
+        ]))
+        elements.append(p_table)
+        elements.append(Spacer(1, 15))
 
-    # ==================== AI QUANTITATIVE ASSESSMENT ====================
-    if not is_normal:
-        elements.append(Paragraph("<b>AI QUANTITATIVE ASSESSMENT</b>", styles['SectionHeader']))
+        # ==================== CLINICAL DATA SECTION ====================
+        clinical_data = []
         
-        # Create probability table
-        table_data = [["Radiographic Finding", "Probability", "Risk Level"]]
+        # Symptoms
+        if symptoms:
+            symptoms_text = ", ".join(symptoms)
+            clinical_data.append([Paragraph("<b>Reported Symptoms:</b>", styles['InfoLabel']),
+                                  Paragraph(symptoms_text, styles['InfoValue'])])
         
-        for p in predictions[:6]:  # Top 6 findings
-            if normalize_class_name(p['disease']) == "NORMAL":
-                continue
-                
-            risk_info = get_risk_assessment(p['disease'], p['probability'])
-            
-            # Risk level styling
-            if risk_info['risk_level'] == 'HIGH RISK':
-                risk_color = colors.HexColor('#ef4444')
-            elif risk_info['risk_level'] == 'MODERATE RISK':
-                risk_color = colors.HexColor('#f59e0b')
-            else:
-                risk_color = colors.HexColor('#3b82f6')
-            
-            table_data.append([
-                p['disease'],
-                f"{p['probability']:.1f}%",
-                Paragraph(f"<font color='{risk_info['hex_color']}'><b>{risk_info['risk_level']}</b></font>", styles['Normal'])
-            ])
+        # Medical History
+        if medical_history:
+            history_text = ", ".join(medical_history)
+            clinical_data.append([Paragraph("<b>Medical History:</b>", styles['InfoLabel']),
+                                  Paragraph(history_text, styles['InfoValue'])])
         
-        if len(table_data) > 1:
-            f_table = Table(table_data, colWidths=[200, 100, 150])
-            f_table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e3a8a')),
-                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 10),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e5e7eb')),
-                ('ALIGN', (1,0), (2,-1), 'CENTER'),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('PADDING', (0,0), (-1,-1), 8),
-                ('FONTSIZE', (0,1), (-1,-1), 9)
+        # Vitals
+        vitals_parts = []
+        if patient_vitals.get('bp'):
+            vitals_parts.append(f"BP: {patient_vitals['bp']}")
+        if patient_vitals.get('sugar'):
+            vitals_parts.append(f"Glucose: {patient_vitals['sugar']}")
+        if patient_vitals.get('smoking'):
+            vitals_parts.append(f"Smoking: {patient_vitals['smoking']}")
+        if patient_vitals.get('alcohol'):
+            vitals_parts.append(f"Alcohol: {patient_vitals['alcohol']}")
+        
+        if vitals_parts:
+            vitals_text = " | ".join(vitals_parts)
+            clinical_data.append([Paragraph("<b>Vital Signs:</b>", styles['InfoLabel']),
+                                  Paragraph(vitals_text, styles['InfoValue'])])
+        
+        if clinical_data:
+            c_table = Table(clinical_data, colWidths=[100, 400])
+            c_table.setStyle(TableStyle([
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4)
             ]))
-            elements.append(f_table)
+            elements.append(c_table)
             elements.append(Spacer(1, 15))
 
-    # ==================== IMAGES SECTION ====================
-    elements.append(Paragraph("<b>RADIOGRAPHIC IMAGING</b>", styles['SectionHeader']))
-    
-    # Create image table
-    if is_normal:
-        # For NORMAL cases - show only original image
-        img_table = Table([
-            [PDFImage(image_path, width=4*inch, height=4*inch)]
-        ])
-        elements.append(img_table)
-        elements.append(Paragraph(f"<i>Fig 1: Original Chest Radiograph - {heatmap_description}</i>", 
-                                 styles['Italic']))
-    else:
-        # For disease cases - show original and heatmap side by side
-        if heatmap_path and os.path.exists(heatmap_path):
-            img_table = Table([
-                [PDFImage(image_path, width=3*inch, height=3*inch), 
-                 PDFImage(heatmap_path, width=3*inch, height=3*inch)]
-            ])
-            elements.append(img_table)
-            elements.append(Paragraph(
-                f"<i>Fig 1: Original Radiograph | Fig 2: AI Attention Map - {heatmap_description}</i>", 
-                styles['Italic']))
+        # ==================== PRIMARY FINDING BANNER ====================
+        if predictions and len(predictions) > 0:
+            primary_pred = predictions[0]
+            primary_class = normalize_class_name(primary_pred['disease'])
+            risk_assessment = get_risk_assessment(primary_class, primary_pred['probability'])
+            
+            if is_normal:
+                banner_text = f"<b>PRIMARY FINDING: NORMAL CHEST RADIOGRAPH - NO ABNORMALITY DETECTED</b>"
+                banner_style = 'RiskNone'
+            else:
+                banner_text = f"<b>PRIMARY FINDING: {primary_class.upper()} - {risk_assessment['risk_level']}</b>"
+                if risk_assessment['risk_level'] == 'HIGH RISK':
+                    banner_style = 'RiskHigh'
+                elif risk_assessment['risk_level'] == 'MODERATE RISK':
+                    banner_style = 'RiskModerate'
+                else:
+                    banner_style = 'RiskLow'
+            
+            elements.append(Paragraph(banner_text, styles[banner_style]))
+            elements.append(Spacer(1, 15))
+
+        # ==================== AI QUANTITATIVE ASSESSMENT ====================
+        if not is_normal and predictions:
+            elements.append(Paragraph("<b>AI QUANTITATIVE ASSESSMENT</b>", styles['SectionHeader']))
+            
+            # Create probability table
+            table_data = [["Radiographic Finding", "Probability", "Risk Level"]]
+            
+            for p in predictions[:6]:  # Top 6 findings
+                if normalize_class_name(p['disease']) == "NORMAL":
+                    continue
+                    
+                risk_info = get_risk_assessment(p['disease'], p['probability'])
+                
+                table_data.append([
+                    p['disease'],
+                    f"{p['probability']:.1f}%",
+                    Paragraph(f"<font color='{risk_info['hex_color']}'><b>{risk_info['risk_level']}</b></font>", styles['Normal'])
+                ])
+            
+            if len(table_data) > 1:
+                f_table = Table(table_data, colWidths=[200, 100, 150])
+                f_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+                    ('ALIGN', (1, 0), (2, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('PADDING', (0, 0), (-1, -1), 8),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9)
+                ]))
+                elements.append(f_table)
+                elements.append(Spacer(1, 15))
+
+        # ==================== IMAGES SECTION ====================
+        elements.append(Paragraph("<b>RADIOGRAPHIC IMAGING</b>", styles['SectionHeader']))
+        
+        # Check if image exists
+        if os.path.exists(image_path):
+            # For NORMAL cases - show only original image
+            if is_normal:
+                img_table = Table([
+                    [PDFImage(image_path, width=4 * inch, height=4 * inch)]
+                ])
+                elements.append(img_table)
+                elements.append(Paragraph(f"<i>Fig 1: Original Chest Radiograph - {heatmap_description}</i>",
+                                         styles['Italic']))
+            else:
+                # For disease cases - show original and heatmap side by side
+                if heatmap_path and os.path.exists(heatmap_path):
+                    img_table = Table([
+                        [PDFImage(image_path, width=3 * inch, height=3 * inch),
+                         PDFImage(heatmap_path, width=3 * inch, height=3 * inch)]
+                    ])
+                    elements.append(img_table)
+                    elements.append(Paragraph(
+                        f"<i>Fig 1: Original Radiograph | Fig 2: AI Attention Map - {heatmap_description}</i>",
+                        styles['Italic']))
+                else:
+                    img_table = Table([
+                        [PDFImage(image_path, width=4 * inch, height=4 * inch)]
+                    ])
+                    elements.append(img_table)
+                    elements.append(Paragraph(f"<i>Fig 1: Original Chest Radiograph</i>", styles['Italic']))
         else:
-            img_table = Table([
-                [PDFImage(image_path, width=4*inch, height=4*inch)]
-            ])
-            elements.append(img_table)
-            elements.append(Paragraph(f"<i>Fig 1: Original Chest Radiograph</i>", styles['Italic']))
-    
-    elements.append(Spacer(1, 15))
+            elements.append(Paragraph("<i>Image not available</i>", styles['Italic']))
+        
+        elements.append(Spacer(1, 15))
 
-    # ==================== CLINICAL INTERPRETATION ====================
-    elements.append(Paragraph("<b>CLINICAL INTERPRETATION</b>", styles['SectionHeader']))
-    
-    primary_explanation = get_disease_explanation(primary_class)
-    
-    if is_normal:
-        interpretation = f"""
-        <b>Diagnostic Impression:</b> {primary_explanation['medical_reason']}
+        # ==================== CLINICAL INTERPRETATION ====================
+        elements.append(Paragraph("<b>CLINICAL INTERPRETATION</b>", styles['SectionHeader']))
+        
+        if predictions and len(predictions) > 0:
+            primary_class = normalize_class_name(predictions[0]['disease'])
+            primary_explanation = get_disease_explanation(primary_class)
+            
+            if is_normal:
+                interpretation = f"""
+                <b>Diagnostic Impression:</b> {primary_explanation['medical_reason']}
+                <br/><br/>
+                <b>AI Attention Analysis:</b> {primary_explanation['ai_reason']} The neural network shows diffuse 
+                attention patterns consistent with normal anatomical structures.
+                """
+                
+                if symptoms:
+                    interpretation += f"<br/><br/><b>Symptom Correlation:</b> The reported symptoms ({', '.join(symptoms)}) are not explained by radiographic findings. Clinical correlation recommended."
+            else:
+                interpretation = f"""
+                <b>Diagnostic Impression:</b> {primary_explanation['medical_reason']}
+                <br/><br/>
+                <b>Possible Causes:</b> {', '.join(primary_explanation['cause_analysis']['possible_causes'][:3])}
+                <br/><br/>
+                <b>Risk Factors:</b> {', '.join(primary_explanation['cause_analysis']['risk_factors'][:3])}
+                <br/><br/>
+                <b>AI Attention Analysis:</b> {primary_explanation['ai_reason']} The Vision Transformer shows focused 
+                attention in areas corresponding to radiographic findings of {primary_class} (confidence: {predictions[0]['probability']:.1f}%).
+                """
+                
+                if symptoms:
+                    interpretation += f"<br/><br/><b>Symptom Correlation:</b> Reported symptoms ({', '.join(symptoms)}) are consistent with the radiographic finding."
+            
+            elements.append(Paragraph(interpretation, styles['NormalText']))
+            elements.append(PageBreak())
+
+        # ==================== PAGE 2: AI GUIDANCE ====================
+        elements.append(Paragraph("<b>AI-GENERATED CLINICAL GUIDANCE</b>", styles['SectionHeader']))
+        elements.append(Spacer(1, 10))
+        
+        # Format AI guidance with bullet points
+        diet_text = ai_guidance.get('diet', '• Consult healthcare provider for personalized advice.').replace('• ', '<br/>• ')
+        lifestyle_text = ai_guidance.get('lifestyle', '• Follow medical advice from professionals.').replace('• ', '<br/>• ')
+        warning_text = ai_guidance.get('warning_signs', '• Severe chest pain<br/>• Difficulty breathing').replace('• ', '<br/>• ')
+        
+        guidance_html = f"""
+        <b>Educational Explanation:</b><br/>
+        {ai_guidance.get('explanation', 'Information not available')}
         <br/><br/>
-        <b>AI Attention Analysis:</b> {primary_explanation['ai_reason']} The neural network shows diffuse 
-        attention patterns consistent with normal anatomical structures.
+        <b>Dietary Considerations:</b><br/>
+        {diet_text}
+        <br/><br/>
+        <b>Lifestyle Recommendations:</b><br/>
+        {lifestyle_text}
         """
         
-        if symptoms:
-            interpretation += f"<br/><br/><b>Symptom Correlation:</b> The reported symptoms ({', '.join(symptoms)}) are not explained by radiographic findings. Clinical correlation recommended."
-    else:
-        interpretation = f"""
-        <b>Diagnostic Impression:</b> {primary_explanation['medical_reason']}
-        <br/><br/>
-        <b>Possible Causes:</b> {', '.join(primary_explanation['cause_analysis']['possible_causes'][:3])}
-        <br/><br/>
-        <b>Risk Factors:</b> {', '.join(primary_explanation['cause_analysis']['risk_factors'][:3])}
-        <br/><br/>
-        <b>AI Attention Analysis:</b> {primary_explanation['ai_reason']} The Vision Transformer shows focused 
-        attention in areas corresponding to radiographic findings of {primary_class} (confidence: {primary_pred['probability']:.1f}%).
+        elements.append(Paragraph(guidance_html, styles['Guidance']))
+        elements.append(Spacer(1, 15))
+        
+        # Emergency signs in red box
+        emergency_html = f"""
+        <font color='#b91c1c'><b>⚠️ WARNING SIGNS REQUIRING IMMEDIATE ATTENTION:</b></font><br/>
+        {warning_text}
+        """
+        elements.append(Paragraph(emergency_html, styles['Emergency']))
+        elements.append(Spacer(1, 15))
+        
+        # Disclaimer
+        elements.append(Paragraph(
+            f"<i>{ai_guidance.get('disclaimer', 'AI-generated educational content. Not medical advice.')}</i>",
+            styles['Italic']
+        ))
+        elements.append(Spacer(1, 20))
+
+        # ==================== RECOMMENDATIONS ====================
+        elements.append(Paragraph("<b>CLINICAL RECOMMENDATIONS</b>", styles['SectionHeader']))
+        
+        if predictions and len(predictions) > 0:
+            primary_class = normalize_class_name(predictions[0]['disease'])
+            primary_explanation = get_disease_explanation(primary_class)
+            
+            if is_normal:
+                rec_text = f"""
+                <b>For the Patient:</b><br/><br/>
+                <b>Recommended Actions:</b><br/>
+                {'<br/>'.join(['• ' + action for action in primary_explanation['precautions']['do'][:4]])}
+                <br/><br/>
+                <b>Follow-up:</b> A normal chest radiograph is reassuring. If symptoms persist, consult with primary care physician.
+                """
+            else:
+                rec_text = f"""
+                <b>For Suspected {primary_class}:</b><br/><br/>
+                <b>Immediate Actions:</b><br/>
+                {'<br/>'.join(['• ' + action for action in primary_explanation['precautions']['do'][:4]])}
+                <br/><br/>
+                <b>Next Steps:</b><br/>
+                • Consult with {get_specialist_for_disease(primary_class)}<br/>
+                • Consider additional imaging if clinically indicated<br/>
+                • Schedule follow-up as directed
+                """
+        else:
+            rec_text = "<b>No specific recommendations available.</b>"
+        
+        elements.append(Paragraph(rec_text, styles['Guidance']))
+        elements.append(Spacer(1, 20))
+
+        # ==================== TECHNICAL METHODOLOGY ====================
+        elements.append(Paragraph("<b>TECHNICAL METHODOLOGY</b>", styles['SectionHeader']))
+        
+        tech_text = f"""
+        <b>AI Architecture:</b> Hybrid Vision Transformer (DeiT-Small + Swin-Tiny)<br/>
+        <b>Fusion Method:</b> Weighted probability averaging (50% DeiT, 50% Swin)<br/>
+        <b>Attention Mapping:</b> {heatmap_description}<br/>
+        <b>Model Mode:</b> {os.getenv('MODEL_MODE', 'hybrid').upper()}<br/>
+        <br/>
+        <b>System Limitations:</b><br/>
+        • AI analysis is preliminary and requires radiologist review<br/>
+        • May miss subtle findings requiring advanced imaging<br/>
+        • Not validated for pediatric or trauma cases<br/>
+        • Clinical correlation with history and symptoms is essential
         """
         
-        if symptoms:
-            interpretation += f"<br/><br/><b>Symptom Correlation:</b> Reported symptoms ({', '.join(symptoms)}) are consistent with the radiographic finding."
-    
-    elements.append(Paragraph(interpretation, styles['NormalText']))
-    elements.append(PageBreak())
+        elements.append(Paragraph(tech_text, styles['Guidance']))
+        elements.append(Spacer(1, 30))
 
-    # ==================== PAGE 2: AI GUIDANCE ====================
-    elements.append(Paragraph("<b>AI-GENERATED CLINICAL GUIDANCE</b>", styles['SectionHeader']))
-    elements.append(Spacer(1, 10))
-    
-    # Format AI guidance with bullet points
-    diet_text = ai_guidance.get('diet', '• Consult healthcare provider for personalized advice.').replace('• ', '<br/>• ')
-    lifestyle_text = ai_guidance.get('lifestyle', '• Follow medical advice from professionals.').replace('• ', '<br/>• ')
-    warning_text = ai_guidance.get('warning_signs', '• Severe chest pain<br/>• Difficulty breathing').replace('• ', '<br/>• ')
-    
-    guidance_html = f"""
-    <b>Educational Explanation:</b><br/>
-    {ai_guidance.get('explanation', 'Information not available')}
-    <br/><br/>
-    <b>Dietary Considerations:</b><br/>
-    {diet_text}
-    <br/><br/>
-    <b>Lifestyle Recommendations:</b><br/>
-    {lifestyle_text}
-    """
-    
-    elements.append(Paragraph(guidance_html, styles['Guidance']))
-    elements.append(Spacer(1, 15))
-    
-    # Emergency signs in red box
-    emergency_html = f"""
-    <font color='#b91c1c'><b>⚠️ WARNING SIGNS REQUIRING IMMEDIATE ATTENTION:</b></font><br/>
-    {warning_text}
-    """
-    elements.append(Paragraph(emergency_html, styles['Emergency']))
-    elements.append(Spacer(1, 15))
-    
-    # Disclaimer
-    elements.append(Paragraph(
-        f"<i>{ai_guidance.get('disclaimer', 'AI-generated educational content. Not medical advice.')}</i>",
-        styles['Italic']
-    ))
-    elements.append(Spacer(1, 20))
+        # ==================== SIGNATURE SECTION ====================
+        # Signature line
+        elements.append(Paragraph("_" * 50, styles['Normal']))
+        elements.append(Spacer(1, 5))
+        
+        elements.append(Paragraph(
+            f"<b>Digitally Reviewed by:</b> {HEAD_RADIOLOGIST}, MD",
+            styles['Normal']
+        ))
+        elements.append(Paragraph(
+            f"<b>Board Certified Radiologist | License:</b> {LICENSE_NO}",
+            styles['Normal']
+        ))
+        elements.append(Paragraph(
+            f"<b>Report Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            styles['Normal']
+        ))
+        elements.append(Spacer(1, 15))
 
-    # ==================== RECOMMENDATIONS ====================
-    elements.append(Paragraph("<b>CLINICAL RECOMMENDATIONS</b>", styles['SectionHeader']))
-    
-    if is_normal:
-        rec_text = f"""
-        <b>For the Patient:</b><br/><br/>
-        <b>Recommended Actions:</b><br/>
-        {'<br/>'.join(['• ' + action for action in primary_explanation['precautions']['do'][:4]])}
-        <br/><br/>
-        <b>Follow-up:</b> A normal chest radiograph is reassuring. If symptoms persist, consult with primary care physician.
+        # ==================== FINAL DISCLAIMER ====================
+        final_disclaimer = """
+        <font size=8>
+        <b>FINAL DISCLAIMER:</b> This report constitutes an AI-assisted preliminary analysis only. 
+        It is not a definitive diagnosis. The interpreting physician bears ultimate responsibility 
+        for final diagnosis and clinical management decisions. Always consult with qualified 
+        healthcare professionals for medical advice. Do not disregard or delay seeking professional 
+        medical advice because of information contained in this report.
+        </font>
         """
-    else:
-        rec_text = f"""
-        <b>For Suspected {primary_class}:</b><br/><br/>
-        <b>Immediate Actions:</b><br/>
-        {'<br/>'.join(['• ' + action for action in primary_explanation['precautions']['do'][:4]])}
-        <br/><br/>
-        <b>Next Steps:</b><br/>
-        • Consult with {get_specialist_for_disease(primary_class)}<br/>
-        • Consider additional imaging if clinically indicated<br/>
-        • Schedule follow-up as directed
-        """
-    
-    elements.append(Paragraph(rec_text, styles['Guidance']))
-    elements.append(Spacer(1, 20))
+        elements.append(Paragraph(final_disclaimer, styles['Disclaimer']))
 
-    # ==================== TECHNICAL METHODOLOGY ====================
-    elements.append(Paragraph("<b>TECHNICAL METHODOLOGY</b>", styles['SectionHeader']))
-    
-    tech_text = f"""
-    <b>AI Architecture:</b> Hybrid Vision Transformer (DeiT-Small + Swin-Tiny)<br/>
-    <b>Fusion Method:</b> Weighted probability averaging (50% DeiT, 50% Swin)<br/>
-    <b>Attention Mapping:</b> {heatmap_description}<br/>
-    <b>Model Mode:</b> {os.getenv('MODEL_MODE', 'hybrid').upper()}<br/>
-    <br/>
-    <b>System Limitations:</b><br/>
-    • AI analysis is preliminary and requires radiologist review<br/>
-    • May miss subtle findings requiring advanced imaging<br/>
-    • Not validated for pediatric or trauma cases<br/>
-    • Clinical correlation with history and symptoms is essential
-    """
-    
-    elements.append(Paragraph(tech_text, styles['Guidance']))
-    elements.append(Spacer(1, 30))
+        # Build PDF
+        doc.build(elements)
+        print(f"✅ PDF report generated: {pdf_path}")
+        
+    except Exception as e:
+        print(f"❌ Error generating PDF: {e}")
+        # Create a minimal fallback PDF
+        try:
+            doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+            styles = getSampleStyleSheet()
+            elements = [
+                Paragraph("Radiology Report", styles['Title']),
+                Spacer(1, 20),
+                Paragraph(f"Patient: {patient.get('name', 'N/A')}", styles['Normal']),
+                Spacer(1, 10),
+                Paragraph("Report generation encountered an error. Please try again.", styles['Normal']),
+                Spacer(1, 20),
+                Paragraph(f"Error: {str(e)}", styles['Italic'])
+            ]
+            doc.build(elements)
+            print(f"✅ Fallback PDF report generated: {pdf_path}")
+        except:
+            print("❌ Critical error generating PDF")
 
-    # ==================== SIGNATURE SECTION ====================
-    # Signature line
-    elements.append(Paragraph("_" * 50, styles['Normal']))
-    elements.append(Spacer(1, 5))
-    
-    elements.append(Paragraph(
-        f"<b>Digitally Reviewed by:</b> {HEAD_RADIOLOGIST}, MD",
-        styles['Normal']
-    ))
-    elements.append(Paragraph(
-        f"<b>Board Certified Radiologist | License:</b> {LICENSE_NO}",
-        styles['Normal']
-    ))
-    elements.append(Paragraph(
-        f"<b>Report Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        styles['Normal']
-    ))
-    elements.append(Spacer(1, 15))
-
-    # ==================== FINAL DISCLAIMER ====================
-    final_disclaimer = """
-    <font size=8>
-    <b>FINAL DISCLAIMER:</b> This report constitutes an AI-assisted preliminary analysis only. 
-    It is not a definitive diagnosis. The interpreting physician bears ultimate responsibility 
-    for final diagnosis and clinical management decisions. Always consult with qualified 
-    healthcare professionals for medical advice. Do not disregard or delay seeking professional 
-    medical advice because of information contained in this report.
-    </font>
-    """
-    elements.append(Paragraph(final_disclaimer, styles['Disclaimer']))
-
-    # Build PDF
-    doc.build(elements)
-    print(f"✅ PDF report generated: {pdf_path}")
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -1031,6 +1094,9 @@ def cleanup_old_files(directory, max_age_hours=24):
         now = datetime.now().timestamp()
         max_age_seconds = max_age_hours * 3600
         
+        if not os.path.exists(directory):
+            return
+            
         for filename in os.listdir(directory):
             filepath = os.path.join(directory, filename)
             if os.path.isfile(filepath):
@@ -1041,14 +1107,19 @@ def cleanup_old_files(directory, max_age_hours=24):
     except Exception as e:
         print(f"❌ Error during cleanup: {e}")
 
+
 def get_file_size_mb(filepath):
     """Get file size in MB."""
-    return os.path.getsize(filepath) / (1024 * 1024)
+    try:
+        return os.path.getsize(filepath) / (1024 * 1024)
+    except:
+        return 0
+
 
 def validate_image_format(filepath):
     """Validate if file is a supported image format."""
     try:
         img = Image.open(filepath)
-        return img.format in ['JPEG', 'PNG', 'DICOM']
+        return img.format in ['JPEG', 'PNG', 'JPG']
     except:
         return False
