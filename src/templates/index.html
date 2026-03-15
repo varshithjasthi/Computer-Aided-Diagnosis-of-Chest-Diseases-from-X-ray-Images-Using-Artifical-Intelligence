@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Radiology Assistant - Medical Imaging Analysis</title>
+    <title>AI Radiology Assistant - Hybrid Transformer Chest X-Ray Analysis (15-Class)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
@@ -601,20 +601,20 @@
             <div class="d-flex justify-content-between align-items-center">
                 <div>
                     <div class="hospital-title">
-                        <i class="fas fa-hospital me-2"></i>
+                        <i class="fas fa-hospital-alt me-2"></i>
                         METRO ADVANCED RADIOLOGY CENTER
                     </div>
                     <div class="department">
-                        Division of Chest Imaging & AI Diagnostics
+                        <i class="fas fa-lungs me-1"></i> Division of Chest Imaging & AI Diagnostics (15-Class Hybrid Transformer)
                     </div>
                 </div>
                 <div class="d-flex align-items-center gap-3">
                     <div class="text-end d-none d-md-block">
-                        <div style="font-size: 0.85rem;">AI-Assisted Diagnostic System</div>
-                        <div style="font-size: 0.75rem; opacity: 0.8;">v2.1 Clinical Release</div>
+                        <div style="font-size: 0.85rem;"><i class="fas fa-robot me-1"></i> AI-Assisted Diagnostic System</div>
+                        <div style="font-size: 0.75rem; opacity: 0.8;"><i class="fas fa-code-branch me-1"></i> v2.5 Clinical Release - Hybrid Model</div>
                     </div>
                     <div class="radiology-badge">
-                        <i class="fas fa-brain me-1"></i> Neural Engine Online
+                        <i class="fas fa-microchip me-1"></i> Hybrid Transformer Online
                     </div>
                 </div>
             </div>
@@ -634,19 +634,19 @@
                     <div class="card-body-medical">
                         <div class="patient-info-grid">
                             <div class="info-item">
-                                <div class="info-label">Patient ID</div>
+                                <div class="info-label"><i class="fas fa-id-card me-1"></i> Patient ID</div>
                                 <input type="text" id="patientId" class="medical-input" placeholder="PX-XXXXXX">
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Full Name</div>
+                                <div class="info-label"><i class="fas fa-user me-1"></i> Full Name</div>
                                 <input type="text" id="patientName" class="medical-input" placeholder="Patient Name">
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Age</div>
+                                <div class="info-label"><i class="fas fa-calendar-alt me-1"></i> Age</div>
                                 <input type="number" id="patientAge" class="medical-input" placeholder="Age">
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Sex</div>
+                                <div class="info-label"><i class="fas fa-venus-mars me-1"></i> Sex</div>
                                 <select id="patientSex" class="medical-input">
                                     <option value="M">Male</option>
                                     <option value="F">Female</option>
@@ -654,11 +654,11 @@
                                 </select>
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Exam Date</div>
+                                <div class="info-label"><i class="fas fa-calendar-check me-1"></i> Exam Date</div>
                                 <input type="date" id="examDate" class="medical-input" value="">
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Referring Doctor</div>
+                                <div class="info-label"><i class="fas fa-user-md me-1"></i> Referring Doctor</div>
                                 <input type="text" id="referringDr" class="medical-input" placeholder="Dr. Name">
                             </div>
                         </div>
@@ -690,15 +690,15 @@
                         </div>
                         <div class="vital-signs-grid">
                             <div class="info-item">
-                                <div class="info-label">Blood Pressure</div>
+                                <div class="info-label"><i class="fas fa-heart me-1"></i> Blood Pressure</div>
                                 <input type="text" id="bloodPressure" class="medical-input vital-input" placeholder="120/80 mmHg">
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Blood Sugar</div>
+                                <div class="info-label"><i class="fas fa-droplet me-1"></i> Blood Sugar</div>
                                 <input type="text" id="sugarLevel" class="medical-input vital-input" placeholder="100 mg/dL">
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Smoking Status</div>
+                                <div class="info-label"><i class="fas fa-smoking me-1"></i> Smoking Status</div>
                                 <select id="smokingStatus" class="medical-input vital-input">
                                     <option value="">Select</option>
                                     <option value="Never">Never</option>
@@ -707,7 +707,7 @@
                                 </select>
                             </div>
                             <div class="info-item">
-                                <div class="info-label">Alcohol Use</div>
+                                <div class="info-label"><i class="fas fa-wine-bottle me-1"></i> Alcohol Use</div>
                                 <select id="alcoholUse" class="medical-input vital-input">
                                     <option value="">Select</option>
                                     <option value="None">None</option>
@@ -733,7 +733,7 @@
                                     <i class="fas fa-camera me-1"></i> Capture X-Ray
                                 </button>
                                 <button class="medical-btn btn-primary-medical" id="retakeBtn" style="display: none;">
-                                    <i class="fas fa-redo me-1"></i> Retake
+                                    <i class="fas fa-redo-alt me-1"></i> Retake
                                 </button>
                             </div>
                         </div>
@@ -771,7 +771,7 @@
                         <!-- Analyze Button -->
                         <div class="mt-4">
                             <button class="medical-btn btn-success-medical w-100" id="analyzeBtn">
-                                <i class="fas fa-brain me-2"></i> Initiate AI Analysis
+                                <i class="fas fa-brain me-2"></i> Initiate AI Analysis (15-Class)
                             </button>
                         </div>
 
@@ -779,8 +779,8 @@
                         <div class="system-status">
                             <div class="status-indicator"></div>
                             <div>
-                                <div>System: <strong>Online</strong></div>
-                                <div style="font-size: 0.7rem;">Model: Active</div>
+                                <div><i class="fas fa-check-circle me-1" style="color: var(--normal-green);"></i> System: <strong>Online</strong></div>
+                                <div style="font-size: 0.7rem;"><i class="fas fa-microchip me-1"></i> Hybrid Transformer: Active</div>
                             </div>
                         </div>
                     </div>
@@ -813,7 +813,7 @@
                                 <div class="normal-icon">
                                     <i class="fas fa-check-circle"></i>
                                 </div>
-                                <div class="normal-text">NORMAL CHEST RADIOGRAPH</div>
+                                <div class="normal-text"><i class="fas fa-check-circle me-2"></i>NORMAL CHEST RADIOGRAPH</div>
                                 <div class="normal-subtext">No radiographic abnormalities detected</div>
                                 <div class="mt-3">
                                     <span class="risk-badge risk-none">
@@ -868,7 +868,7 @@
                                 </div>
                                 <div id="heatmapContainer">
                                     <div class="text-center mb-2" style="font-weight: 500; color: var(--hospital-blue);">
-                                        <i class="fas fa-fire me-1"></i> AI Attention Map
+                                        <i class="fas fa-fire me-1"></i> AI Attention Map (Hybrid)
                                     </div>
                                     <img id="heatmapImage" class="comparison-image" src="" alt="AI Attention Map">
                                 </div>
@@ -898,7 +898,7 @@
                         <div class="tab-pane active" id="predictionsTab">
                             <div class="medical-card">
                                 <div class="card-header-medical">
-                                    <i class="fas fa-percentage me-2"></i> AI Quantitative Assessment
+                                    <i class="fas fa-percentage me-2"></i> AI Quantitative Assessment (15 Classes)
                                 </div>
                                 <div class="card-body-medical">
                                     <div class="row">
@@ -931,7 +931,7 @@
                                         <div class="col-md-6">
                                             <div class="graph-container">
                                                 <div class="text-center mb-3" style="font-weight: 500; color: var(--hospital-blue);">
-                                                    Normal vs Disease Probability
+                                                    <i class="fas fa-chart-pie me-1"></i> Normal vs Disease Probability
                                                 </div>
                                                 <img id="donutChart" src="" alt="Donut Chart" style="width: 100%; height: 250px; object-fit: contain;">
                                             </div>
@@ -939,7 +939,7 @@
                                         <div class="col-md-6">
                                             <div class="graph-container">
                                                 <div class="text-center mb-3" style="font-weight: 500; color: var(--hospital-blue);">
-                                                    Top Disease Probabilities
+                                                    <i class="fas fa-chart-bar me-1"></i> Top 15 Disease Probabilities
                                                 </div>
                                                 <img id="barChart" src="" alt="Bar Chart" style="width: 100%; height: 250px; object-fit: contain;">
                                             </div>
@@ -1044,23 +1044,23 @@
                                 <i class="fas fa-lungs"></i>
                             </div>
                             <h3 style="color: var(--text-secondary); margin-bottom: 1rem;">
-                                Awaiting Radiographic Analysis
+                                <i class="fas fa-hourglass-half me-2"></i>Awaiting Radiographic Analysis
                             </h3>
                             <p style="color: var(--text-secondary); max-width: 600px; margin: 0 auto 2rem;">
                                 Capture or upload a chest X-ray image to begin AI-assisted analysis. 
-                                The system will evaluate for 9 common thoracic pathologies using Vision Transformer technology.
+                                The system will evaluate for <strong>15 thoracic disease classes</strong> using a <strong>Hybrid Transformer architecture</strong>.
                             </p>
-                            <div class="d-flex justify-content-center gap-3">
+                            <div class="d-flex justify-content-center gap-4">
                                 <div class="text-center">
-                                    <div style="font-size: 0.8rem; color: var(--text-secondary);">Model Architecture</div>
-                                    <div style="font-weight: 600; color: var(--hospital-blue);">Vision Transformer</div>
+                                    <div style="font-size: 0.8rem; color: var(--text-secondary);"><i class="fas fa-microchip me-1"></i> Model Architecture</div>
+                                    <div style="font-weight: 600; color: var(--hospital-blue);">Hybrid Transformer (CNN + ViT)</div>
                                 </div>
                                 <div class="text-center">
-                                    <div style="font-size: 0.8rem; color: var(--text-secondary);">Pathologies Detected</div>
-                                    <div style="font-weight: 600; color: var(--hospital-blue);">9 Classes</div>
+                                    <div style="font-size: 0.8rem; color: var(--text-secondary);"><i class="fas fa-disease me-1"></i> Pathologies Detected</div>
+                                    <div style="font-weight: 600; color: var(--hospital-blue);">15 Classes</div>
                                 </div>
                                 <div class="text-center">
-                                    <div style="font-size: 0.8rem; color: var(--text-secondary);">Analysis Time</div>
+                                    <div style="font-size: 0.8rem; color: var(--text-secondary);"><i class="fas fa-stopwatch me-1"></i> Analysis Time</div>
                                     <div style="font-weight: 600; color: var(--hospital-blue);">< 3 seconds</div>
                                 </div>
                             </div>
@@ -1074,12 +1074,12 @@
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay" style="display: none;">
         <div class="ai-pulse" style="font-size: 4rem; margin-bottom: 1rem;">
-            <i class="fas fa-brain"></i>
+            <i class="fas fa-microchip"></i>
         </div>
-        <h3 style="font-weight: 300; margin-bottom: 1rem;">Neural Engine Processing</h3>
+        <h3 style="font-weight: 300; margin-bottom: 1rem;"><i class="fas fa-sync fa-spin me-2"></i>Hybrid Transformer Processing</h3>
         <p style="max-width: 500px; text-align: center; line-height: 1.6; opacity: 0.8;">
-            Analyzing radiographic patterns using Vision Transformer architecture.<br>
-            Generating attention maps and clinical correlations...
+            Analyzing radiographic patterns using Hybrid Transformer architecture.<br>
+            <i class="fas fa-list-ul me-1"></i> Evaluating 15 thoracic disease classes: Atelectasis, Cardiomegaly, Consolidation, Edema, Effusion, Emphysema, Fibrosis, Hernia, Infiltration, Mass, No Finding, Nodule, Pleural_Thickening, Pneumonia, Pneumothorax.
         </p>
         <div class="spinner-border mt-3" role="status">
             <span class="visually-hidden">Loading...</span>
@@ -1146,7 +1146,7 @@
 
             } catch (error) {
                 console.error('Error loading symptoms:', error);
-                symptomsContainer.innerHTML = '<div class="alert alert-warning">Could not load symptoms database</div>';
+                symptomsContainer.innerHTML = '<div class="alert alert-warning"><i class="fas fa-exclamation-triangle me-2"></i>Could not load symptoms database</div>';
             }
         }
 
@@ -1279,7 +1279,7 @@
                 document.getElementById('primaryFindingDisease').style.display = 'block';
                 document.getElementById('heatmapContainer').style.display = 'block';
                 
-                // Set primary disease info
+                // Set primary disease info with icon
                 const diseaseIcon = getDiseaseIcon(data.primary_finding);
                 document.getElementById('diseaseIcon').innerHTML = diseaseIcon;
                 document.getElementById('primaryDisease').textContent = data.primary_finding;
@@ -1303,7 +1303,7 @@
             // Set clinical note
             document.getElementById('clinicalNote').innerHTML = `
                 <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--hospital-blue);">
-                    <strong>Clinical Note:</strong> ${data.clinical_note}
+                    <strong><i class="fas fa-notes-medical me-2"></i>Clinical Note:</strong> ${data.clinical_note}
                 </div>
             `;
             
@@ -1343,13 +1343,13 @@
             // Set disease breakdown
             if (data.disease_breakdown && data.disease_breakdown.length > 0) {
                 let breakdownHtml = '<div class="disease-breakdown">';
-                data.disease_breakdown.slice(0, 3).forEach(item => {
+                data.disease_breakdown.slice(0, 5).forEach(item => {
                     breakdownHtml += `
                         <div class="disease-item">
                             <div class="disease-name">${item.disease}</div>
                             <div class="d-flex justify-content-between">
-                                <div class="disease-probability">Probability: ${item.probability.toFixed(1)}%</div>
-                                <div class="disease-probability">Contribution: ${item.contribution.toFixed(1)}%</div>
+                                <div class="disease-probability"><i class="fas fa-percentage me-1"></i>Probability: ${item.probability.toFixed(1)}%</div>
+                                <div class="disease-probability"><i class="fas fa-chart-pie me-1"></i>Contribution: ${item.contribution.toFixed(1)}%</div>
                             </div>
                         </div>
                     `;
@@ -1365,14 +1365,14 @@
                 predictionsHtml += `
                     <div class="disease-item">
                         <div class="d-flex justify-content-between align-items-center">
-                            <div class="disease-name">${pred.disease}</div>
+                            <div class="disease-name">${getDiseaseIcon(pred.disease)} ${pred.disease}</div>
                             <div>
                                 <span class="risk-badge ${riskClass}" style="font-size: 0.8rem; padding: 0.25rem 0.5rem;">
                                     ${pred.risk}
                                 </span>
                             </div>
                         </div>
-                        <div class="disease-probability">Probability: ${formatProbability(pred.probability)}</div>
+                        <div class="disease-probability"><i class="fas fa-percentage me-1"></i>Probability: ${formatProbability(pred.probability)}</div>
                     </div>
                 `;
             });
@@ -1399,19 +1399,19 @@
             const patientSummary = `
                 <div class="patient-info-grid">
                     <div class="info-item">
-                        <div class="info-label">Patient ID</div>
+                        <div class="info-label"><i class="fas fa-id-card me-1"></i> Patient ID</div>
                         <div class="info-value">${document.getElementById('patientId').value || 'Not specified'}</div>
                     </div>
                     <div class="info-item">
-                        <div class="info-label">Age / Sex</div>
+                        <div class="info-label"><i class="fas fa-user me-1"></i> Age / Sex</div>
                         <div class="info-value">${document.getElementById('patientAge').value || 'N/A'} / ${document.getElementById('patientSex').value}</div>
                     </div>
                     <div class="info-item">
-                        <div class="info-label">Exam Date</div>
+                        <div class="info-label"><i class="fas fa-calendar-alt me-1"></i> Exam Date</div>
                         <div class="info-value">${document.getElementById('examDate').value}</div>
                     </div>
                     <div class="info-item">
-                        <div class="info-label">Report ID</div>
+                        <div class="info-label"><i class="fas fa-file-invoice me-1"></i> Report ID</div>
                         <div class="info-value">${data.report_id}</div>
                     </div>
                 </div>
@@ -1422,15 +1422,15 @@
             if (data.symptoms && data.symptoms.length > 0) {
                 document.getElementById('symptomCorrelation').innerHTML = `
                     <div style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
-                        <strong>Reported Symptoms:</strong> ${data.symptoms.join(', ')}<br><br>
-                        <strong>Correlation:</strong> ${data.symptoms.length} symptom(s) reported for clinical correlation.
+                        <strong><i class="fas fa-stethoscope me-2"></i>Reported Symptoms:</strong> ${data.symptoms.join(', ')}<br><br>
+                        <strong><i class="fas fa-chart-line me-2"></i>Correlation:</strong> ${data.symptoms.length} symptom(s) reported for clinical correlation.
                     </div>
                 `;
             } else {
                 document.getElementById('symptomCorrelation').innerHTML = `
                     <div style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
-                        <strong>Reported Symptoms:</strong> None reported<br><br>
-                        <strong>Correlation:</strong> Clinical assessment required as findings may be asymptomatic.
+                        <strong><i class="fas fa-stethoscope me-2"></i>Reported Symptoms:</strong> None reported<br><br>
+                        <strong><i class="fas fa-chart-line me-2"></i>Correlation:</strong> Clinical assessment required as findings may be asymptomatic.
                     </div>
                 `;
             }
@@ -1446,20 +1446,26 @@
             resultsContainer.scrollIntoView({ behavior: 'smooth' });
         }
 
-        // Get disease icon
+        // Get disease icon (returns full HTML with proper icon)
         function getDiseaseIcon(disease) {
             const icons = {
-                'Pneumothorax': 'fas fa-lungs-virus',
-                'Pneumonia': 'fas fa-lungs',
-                'Effusion': 'fas fa-tint',
-                'Cardiomegaly': 'fas fa-heartbeat',
-                'Atelectasis': 'fas fa-lungs',
-                'Mass': 'fas fa-tumor',
-                'Nodule': 'fas fa-circle',
-                'Infiltration': 'fas fa-cloud',
-                'NORMAL': 'fas fa-check-circle'
+                'Atelectasis': '<i class="fas fa-lungs" style="color: var(--radiology-red);"></i>',
+                'Cardiomegaly': '<i class="fas fa-heartbeat" style="color: var(--radiology-red);"></i>',
+                'Consolidation': '<i class="fas fa-lungs-virus" style="color: var(--radiology-red);"></i>',
+                'Edema': '<i class="fas fa-droplet" style="color: var(--radiology-red);"></i>',
+                'Effusion': '<i class="fas fa-tint" style="color: var(--radiology-red);"></i>',
+                'Emphysema': '<i class="fas fa-lungs" style="color: var(--radiology-red);"></i>',
+                'Fibrosis': '<i class="fas fa-lungs" style="color: var(--radiology-red);"></i>',
+                'Hernia': '<i class="fas fa-rupture" style="color: var(--radiology-red);"></i>',
+                'Infiltration': '<i class="fas fa-cloud" style="color: var(--radiology-red);"></i>',
+                'Mass': '<i class="fas fa-circle" style="color: var(--radiology-red);"></i>',
+                'No Finding': '<i class="fas fa-check-circle" style="color: var(--normal-green);"></i>',
+                'Nodule': '<i class="fas fa-circle" style="color: var(--radiology-red);"></i>',
+                'Pleural_Thickening': '<i class="fas fa-layer-group" style="color: var(--radiology-red);"></i>',
+                'Pneumonia': '<i class="fas fa-lungs" style="color: var(--radiology-red);"></i>',
+                'Pneumothorax': '<i class="fas fa-lungs-virus" style="color: var(--radiology-red);"></i>'
             };
-            return icons[disease] || 'fas fa-question-circle';
+            return icons[disease] || '<i class="fas fa-question-circle" style="color: var(--radiology-red);"></i>';
         }
 
         // Get risk class
@@ -1592,4 +1598,4 @@
         });
     </script>
 </body>
-</h
+</html>
